@@ -44,7 +44,17 @@ jobs:
           # Append the three mbedTLS archives *after* the framework libs.
           cat > wled/link_mbedtls.py <<'PY'
           Import("env")
-          env.Append(LIBS=["mbedtls", "mbedx509", "mbedcrypto"])
+          import os, glob
+          sdk_lib = os.path.join(env.subst("$PROJECT_PACKAGES_DIR"),
+                                 "framework-arduinoespressif32", "tools", "sdk", "esp32", "lib")
+          print("[link_mbedtls] sdk_lib=%s isdir=%s" % (sdk_lib, os.path.isdir(sdk_lib)))
+          mbed = sorted(glob.glob(os.path.join(sdk_lib, "libmbed*.a")))
+          print("[link_mbedtls] archives=%s" % mbed)
+          if not mbed and os.path.isdir(sdk_lib):
+              print("[link_mbedtls] *.a in sdk_lib:", sorted(os.path.basename(p) for p in glob.glob(os.path.join(sdk_lib, "*.a"))))
+          # Append the mbedTLS archives last so the linker can satisfy the
+          # mbedtls_ssl_* references pulled in from libesp-tls.a.
+          env.Append(LIBS=[os.path.abspath(p) for p in mbed])
           PY
 
           cat > wled/platformio_override.ini <<EOF
