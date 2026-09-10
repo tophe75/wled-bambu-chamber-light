@@ -46,10 +46,16 @@ It:
    latest stable tag as of this writing).
 2. Drops the usermod into WLED's `usermods/` folder and writes a
    `platformio_override.ini` that builds the standard `esp32dev`
-   environment plus this usermod (nothing else about the stock build
-   is changed).
-3. Installs PlatformIO and runs `pio run`.
-4. Uploads the resulting firmware as a workflow artifact named
+   environment plus this usermod.
+3. Runs `fetch_mbedtls_ssl.py` (a PlatformIO `pre:` script it also
+   writes). WLED's ESP32 framework ships mbedTLS **crypto-only** — no
+   TLS/SSL layer, no `WiFiClientSecure` — so this step pulls the
+   matching `ssl_*.c` sources from the Mbed-TLS repo into the usermod
+   and patches the framework's `esp_config.h` to re-enable a TLS 1.2
+   client (RSA / DHE-RSA). All of this happens on the CI runner only;
+   nothing extra is committed here. See the comments in `build.yml`.
+4. Installs PlatformIO and runs `pio run`.
+5. Uploads the resulting firmware as a workflow artifact named
    `WLED_esp32dev_bambu_<ref>` (`<ref>` is `main` for a branch build,
    or the tag name for a tagged release build).
 
@@ -119,9 +125,12 @@ None of this needs a rebuild to change later — it's saved to
 
 ## How it behaves
 
-- Opens its own MQTT session to `<printer-ip>:8883` (TLS, self-signed
-  cert accepted via `setInsecure()`, `bblp` / access-code auth) — this
-  is exactly how every other LAN-only Bambu integration connects.
+- Opens its own MQTT session to `<printer-ip>:8883` (TLS 1.2, no
+  certificate verification — same as `WiFiClientSecure::setInsecure()`
+  — with `bblp` / access-code auth). The TLS is done by `mbedtls_ssl_*`
+  directly (see `bambu_tls_client.h`), since WLED's ESP32 framework has
+  no TLS library of its own. This is exactly how every other LAN-only
+  Bambu integration connects.
 - Reconnects at most once every 30 seconds if the printer is
   unreachable (powered off, wrong IP, etc.), so a dead printer never
   blocks WLED's own LED output.
@@ -132,5 +141,12 @@ None of this needs a rebuild to change later — it's saved to
 
 ## Making changes later
 
-Edit `bambu_chamber_light.cpp`, commit, push — the Action rebuilds
-automatically and a fresh `firmware.bin` artifact appears on that run.
+Edit `bambu_chamber_light.cpp` (behaviour) or `bambu_tls_client.h` (the
+TLS transport), commit, push — the Action rebuilds automatically and a
+fresh firmware artifact appears on that run.
+
+If you bump `WLED_REF` in `build.yml` to a newer WLED release, the
+`fetch_mbedtls_ssl.py` step re-detects that framework's mbedTLS version
+and pulls matching sources, so it should keep working. If a future
+framework moves further away from stock mbedTLS 2.28.x, that script is
+where a fix would go (its comments explain the constraints).
