@@ -34,7 +34,7 @@ jobs:
       - name: Drop the usermod into WLED's usermods/ folder
         run: |
           mkdir -p "wled/usermods/${USERMOD_NAME}"
-          cp usermod-src/*.cpp usermod-src/library.json "wled/usermods/${USERMOD_NAME}/"
+          cp usermod-src/*.cpp usermod-src/*.h usermod-src/library.json "wled/usermods/${USERMOD_NAME}/"
 
       - name: Write platformio_override.ini
         run: |

@@ -1,7 +1,6 @@
 #include "wled.h"
-#include <WiFiClient.h>
-#include <SSLClient.h>     // mbedTLS-based TLS Client wrapper (digitaldragon/SSLClient)
 #include <PubSubClient.h>
+#include "bambu_tls_client.h"   // minimal esp_tls-backed Arduino Client (no WiFiClientSecure in WLED's framework)
 
 /*
  * Usermod: Bambu Chamber Light Sync
@@ -21,14 +20,9 @@
  * Printer's local MQTT broker:
  *   host      = printer LAN IP
  *   port      = 8883 (TLS, self-signed certificate — verification is
- *               intentionally skipped below via setInsecure(), same as
- *               every other LAN Bambu integration does; the link is
- *               still encrypted, just not certificate-pinned)
- *
- * TLS transport: WLED's ESP32 Arduino framework ships without the core
- * WiFiClientSecure library, so this usermod uses digitaldragon/SSLClient
- * (a small mbedTLS wrapper) layered over a plain WiFiClient instead. Its
- * setInsecure() / connect() API mirrors WiFiClientSecure.
+ *               intentionally skipped, same as every other LAN Bambu
+ *               integration does; the link is still encrypted, just not
+ *               certificate-pinned)
  *   username  = "bblp"
  *   password  = LAN Access Code
  *   pub topic = device/<SERIAL>/request
@@ -37,6 +31,11 @@
  *   {"system":{"sequence_id":"0","command":"ledctrl","led_node":"chamber_light",
  *              "led_mode":"on"|"off","led_on_time":500,"led_off_time":500,
  *              "loop_times":0,"interval_time":0}}
+ *
+ * TLS transport: WLED's ESP32 Arduino framework ships without the core
+ * WiFiClientSecure library, so this usermod carries a tiny Arduino Client
+ * built on ESP-IDF's esp_tls (see bambu_tls_client.h) — no certificate
+ * verification, matching WiFiClientSecure::setInsecure().
  *
  * All connection details are exposed as usermod settings (Config > Usermods
  * in the WLED UI) — nothing is hardcoded, nothing needs recompiling to change.
@@ -53,8 +52,7 @@ class BambuChamberLightUsermod : public Usermod {
     bool     invert      = false;           // send "off" when WLED turns on, and vice versa
 
     // ---- runtime state ----
-    WiFiClient       netClient;
-    SSLClient        secureClient{&netClient};
+    BambuTlsClient   secureClient;
     PubSubClient     mqtt;
     unsigned long    lastReconnectAttempt = 0;
     const unsigned long reconnectIntervalMs = 30000; // don't hammer the printer if it's offline
@@ -91,9 +89,8 @@ class BambuChamberLightUsermod : public Usermod {
 
       DEBUG_PRINTLN(F("[BambuLight] connecting to printer MQTT..."));
       secureClient.setInsecure();          // printer uses a self-signed cert on LAN
-      secureClient.setHandshakeTimeout(4); // seconds; SSLClient defaults to 120s,
-                                           // far too long to block the WLED loop
-      secureClient.setTimeout(4000);       // ms; bound the underlying socket too
+      secureClient.setConnectTimeout(4000); // ms; bound the TLS handshake so an
+                                            // unreachable printer can't stall WLED
       mqtt.setServer(printerIP.c_str(), 8883);
       mqtt.setSocketTimeout(2);   // keep a failed attempt from stalling the WLED loop
       mqtt.setBufferSize(512);
