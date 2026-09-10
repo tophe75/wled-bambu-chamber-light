@@ -1,0 +1,64 @@
+name: Build WLED firmware (esp32dev + bambu_chamber_light)
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch: {}   # lets you re-trigger a build manually from the Actions tab
+
+env:
+  WLED_REPO: wled/WLED
+  WLED_REF: v16.0.1        # pin to a known-good WLED release; bump deliberately when you want to update
+  USERMOD_NAME: wled-bambu-chamber-light
+  PIO_ENV: esp32dev_bambu
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout this usermod repo
+        uses: actions/checkout@v4
+        with:
+          path: usermod-src
+
+      - name: Checkout WLED (${{ env.WLED_REF }})
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.WLED_REPO }}
+          ref: ${{ env.WLED_REF }}
+          path: wled
+
+      - name: Drop the usermod into WLED's usermods/ folder
+        run: |
+          mkdir -p "wled/usermods/${USERMOD_NAME}"
+          cp usermod-src/*.cpp usermod-src/library.json "wled/usermods/${USERMOD_NAME}/"
+
+      - name: Write platformio_override.ini
+        run: |
+          cat > wled/platformio_override.ini <<EOF
+          [platformio]
+          default_envs = ${PIO_ENV}
+
+          [env:${PIO_ENV}]
+          extends = env:esp32dev
+          custom_usermods = \${env:esp32dev.custom_usermods} ${USERMOD_NAME}
+          build_flags = \${env:esp32dev.build_flags} -D WLED_RELEASE_NAME=\"ESP32_BambuChamberLight\"
+          EOF
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Install PlatformIO
+        run: pip install -U platformio
+
+      - name: Build firmware
+        working-directory: wled
+        run: pio run -e ${{ env.PIO_ENV }}
+
+      - name: Upload firmware artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: WLED_${{ env.PIO_ENV }}
+          path: wled/.pio/build/${{ env.PIO_ENV }}/firmware.bin
+          if-no-files-found: error
