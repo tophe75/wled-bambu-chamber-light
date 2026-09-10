@@ -1,5 +1,6 @@
 #include "wled.h"
-#include <WiFiClientSecure.h>
+#include <WiFiClient.h>
+#include <SSLClient.h>     // mbedTLS-based TLS Client wrapper (digitaldragon/SSLClient)
 #include <PubSubClient.h>
 
 /*
@@ -23,6 +24,11 @@
  *               intentionally skipped below via setInsecure(), same as
  *               every other LAN Bambu integration does; the link is
  *               still encrypted, just not certificate-pinned)
+ *
+ * TLS transport: WLED's ESP32 Arduino framework ships without the core
+ * WiFiClientSecure library, so this usermod uses digitaldragon/SSLClient
+ * (a small mbedTLS wrapper) layered over a plain WiFiClient instead. Its
+ * setInsecure() / connect() API mirrors WiFiClientSecure.
  *   username  = "bblp"
  *   password  = LAN Access Code
  *   pub topic = device/<SERIAL>/request
@@ -47,7 +53,8 @@ class BambuChamberLightUsermod : public Usermod {
     bool     invert      = false;           // send "off" when WLED turns on, and vice versa
 
     // ---- runtime state ----
-    WiFiClientSecure secureClient;
+    WiFiClient       netClient;
+    SSLClient        secureClient{&netClient};
     PubSubClient     mqtt;
     unsigned long    lastReconnectAttempt = 0;
     const unsigned long reconnectIntervalMs = 30000; // don't hammer the printer if it's offline
@@ -83,7 +90,10 @@ class BambuChamberLightUsermod : public Usermod {
       lastReconnectAttempt = now;
 
       DEBUG_PRINTLN(F("[BambuLight] connecting to printer MQTT..."));
-      secureClient.setInsecure(); // printer uses a self-signed cert on LAN
+      secureClient.setInsecure();          // printer uses a self-signed cert on LAN
+      secureClient.setHandshakeTimeout(4); // seconds; SSLClient defaults to 120s,
+                                           // far too long to block the WLED loop
+      secureClient.setTimeout(4000);       // ms; bound the underlying socket too
       mqtt.setServer(printerIP.c_str(), 8883);
       mqtt.setSocketTimeout(2);   // keep a failed attempt from stalling the WLED loop
       mqtt.setBufferSize(512);

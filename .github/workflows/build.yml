@@ -36,26 +36,8 @@ jobs:
           mkdir -p "wled/usermods/${USERMOD_NAME}"
           cp usermod-src/*.cpp usermod-src/library.json "wled/usermods/${USERMOD_NAME}/"
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.x'
-
-      - name: Install PlatformIO
-        run: pip install -U platformio
-
-      - name: Install the WLED platform/framework packages
-        working-directory: wled
-        # Do this before writing platformio_override.ini so the ESP32 framework
-        # (and its bundled WiFiClientSecure library) is unpacked on disk and we
-        # can point lib_deps straight at it.
-        run: pio pkg install -e esp32dev
-
       - name: Write platformio_override.ini
         run: |
-          FW_LIBS="$(find "$HOME/.platformio/packages" -maxdepth 2 -type d -name libraries -path '*framework-arduinoespressif32*' | head -1)"
-          echo "framework libraries dir: $FW_LIBS"
-          test -d "$FW_LIBS/WiFiClientSecure" || { echo "WiFiClientSecure not found in framework!"; ls "$FW_LIBS"; exit 1; }
           cat > wled/platformio_override.ini <<EOF
           [platformio]
           default_envs = ${PIO_ENV}
@@ -64,18 +46,17 @@ jobs:
           extends = env:esp32dev
           custom_usermods = \${env:esp32dev.custom_usermods} ${USERMOD_NAME}
           build_flags = \${env:esp32dev.build_flags} -D WLED_RELEASE_NAME=\"ESP32_BambuChamberLight\"
-          ; Only this usermod pulls in <WiFiClientSecure.h>. WLED core never
-          ; includes it, so PlatformIO's default "chain" dependency finder never
-          ; adds that bundled ESP32-framework library to the build graph, and
-          ; naming it in library.json just makes PIO look for a (non-existent)
-          ; registry package. Point lib_deps straight at the framework's own
-          ; copy so it gets compiled and put on the include path.
-          lib_deps =
-            \${env:esp32dev.lib_deps}
-            ${FW_LIBS}/WiFiClientSecure
           EOF
           echo "--- generated wled/platformio_override.ini ---"
           cat wled/platformio_override.ini
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Install PlatformIO
+        run: pip install -U platformio
 
       - name: Build firmware
         working-directory: wled

@@ -2,6 +2,7 @@
   "name": "wled-bambu-chamber-light",
   "build": { "libArchive": false },
   "dependencies": {
-    "knolleary/PubSubClient": "^2.8"
+    "knolleary/PubSubClient": "^2.8",
+    "digitaldragon/SSLClient": "^1.3.1"
   }
 }
