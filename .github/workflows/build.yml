@@ -36,34 +36,57 @@ jobs:
           mkdir -p "wled/usermods/${USERMOD_NAME}"
           cp usermod-src/*.cpp usermod-src/*.h usermod-src/library.json "wled/usermods/${USERMOD_NAME}/"
 
-      - name: Write platformio_override.ini
+      - name: Write platformio_override.ini and the mbedTLS-SSL fetch script
         run: |
-          # WLED's stock ESP32 build never links the mbedTLS SSL module (nothing
-          # in WLED core does TLS), so the esp_tls calls this usermod's
-          # bambu_tls_client.h makes leave mbedtls_ssl_* undefined at link time.
-          # Append the three mbedTLS archives *after* the framework libs.
-          cat > wled/link_mbedtls.py <<'PY'
+          # WLED's ESP32 framework ships mbedTLS as crypto-only: the SSL/TLS
+          # record + handshake layer (mbedtls_ssl_*) is in no framework archive,
+          # and there is no WiFiClientSecure. This pre: script drops the exact
+          # matching mbedTLS ssl_*.c sources into the usermod so they compile
+          # with it and link against the framework's libmbedcrypto/libmbedx509.
+          cat > wled/fetch_mbedtls_ssl.py <<'PY'
           Import("env")
-          import os, glob, subprocess
-          sdk_lib = os.path.join(env.subst("$PROJECT_PACKAGES_DIR"),
-                                 "framework-arduinoespressif32", "tools", "sdk", "esp32", "lib")
-          alla = sorted(glob.glob(os.path.join(sdk_lib, "*.a")))
-          print("[diag] sdk_lib=%s (%d archives)" % (sdk_lib, len(alla)))
-          nm = env.subst("$CC").replace("gcc", "nm")
-          want = "mbedtls_ssl_handshake"
-          providers = []
-          for a in alla:
-              try:
-                  out = subprocess.check_output([nm, "-A", "--defined-only", a],
-                                                stderr=subprocess.DEVNULL).decode("utf-8", "ignore")
-              except Exception as e:
-                  continue
-              if want in out and (" T " + want in out or " W " + want in out):
-                  providers.append(os.path.basename(a))
-          print("[diag] archives defining %s: %s" % (want, providers))
-          print("[diag] TLS-ish archives present: %s" %
-                [os.path.basename(p) for p in alla
-                 if any(k in os.path.basename(p) for k in ("mbed","bear","tls","ssl","wolf","crypto"))])
+          import os, re, glob, urllib.request
+
+          umdir = os.path.join(env.subst("$PROJECT_DIR"), "usermods", "wled-bambu-chamber-light")
+          pkgs  = env.subst("$PROJECT_PACKAGES_DIR")
+
+          # 1. exact mbedTLS version bundled with this framework -> git tag
+          ver = None
+          for vh in glob.glob(os.path.join(pkgs, "framework-arduinoespressif32", "**", "mbedtls", "version.h"),
+                              recursive=True):
+              m = re.search(r'MBEDTLS_VERSION_STRING\s+"([0-9.]+)"', open(vh).read())
+              if m:
+                  ver = m.group(1)
+                  break
+          if not ver:
+              raise SystemExit("[fetch_mbedtls_ssl] could not find framework mbedTLS version.h")
+          tag = "v" + ver
+          print("[fetch_mbedtls_ssl] framework mbedTLS %s -> tag %s" % (ver, tag))
+
+          # 2. minimal set for a TLS 1.2 client: 4 SSL impl files + constant_time,
+          #    plus the private library/ headers they include.
+          base = "https://raw.githubusercontent.com/Mbed-TLS/mbedtls/%s/library/" % tag
+          for fn in ("common.h", "constant_time_internal.h", "constant_time_invasive.h",
+                     "constant_time.c", "ssl_ciphersuites.c", "ssl_cli.c", "ssl_msg.c", "ssl_tls.c"):
+              dst = os.path.join(umdir, fn)
+              if not os.path.exists(dst):
+                  print("[fetch_mbedtls_ssl] GET " + base + fn)
+                  urllib.request.urlretrieve(base + fn, dst)
+
+          # 3. compile everything with the framework's own mbedTLS config so the
+          #    struct layouts match the prebuilt libmbedcrypto/libmbedx509.
+          defs = [d[0] if isinstance(d, (list, tuple)) else d for d in env.get("CPPDEFINES", [])]
+          print("[fetch_mbedtls_ssl] MBEDTLS_CONFIG_FILE already defined:", "MBEDTLS_CONFIG_FILE" in defs)
+          if "MBEDTLS_CONFIG_FILE" not in defs:
+              env.Append(CPPDEFINES=[("MBEDTLS_CONFIG_FILE", '\\"mbedtls/esp_config.h\\"')])
+
+          # 4. make sure the crypto/x509 archives are on the link line for our ssl_*.o
+          sdk_lib = os.path.join(pkgs, "framework-arduinoespressif32", "tools", "sdk", "esp32", "lib")
+          for a in ("libmbedx509.a", "libmbedcrypto.a"):
+              p = os.path.join(sdk_lib, a)
+              if os.path.exists(p):
+                  env.Append(LIBS=[env.File(p)])
+          env.Append(LINKFLAGS=["-Wl,--allow-multiple-definition"])
           PY
 
           cat > wled/platformio_override.ini <<EOF
@@ -75,12 +98,10 @@ jobs:
           custom_usermods = \${env:esp32dev.custom_usermods} ${USERMOD_NAME}
           build_flags = \${env:esp32dev.build_flags} -D WLED_RELEASE_NAME=\"ESP32_BambuChamberLight\"
           extra_scripts = \${scripts_defaults.extra_scripts}
-            post:link_mbedtls.py
+            pre:fetch_mbedtls_ssl.py
           EOF
-          echo "--- generated wled/platformio_override.ini ---"
-          cat wled/platformio_override.ini
-          echo "--- generated wled/link_mbedtls.py ---"
-          cat wled/link_mbedtls.py
+          echo "--- generated wled/platformio_override.ini ---"; cat wled/platformio_override.ini
+          echo "--- generated wled/fetch_mbedtls_ssl.py ---";   cat wled/fetch_mbedtls_ssl.py
 
       - name: Set up Python
         uses: actions/setup-python@v5
