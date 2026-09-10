@@ -44,17 +44,26 @@ jobs:
           # Append the three mbedTLS archives *after* the framework libs.
           cat > wled/link_mbedtls.py <<'PY'
           Import("env")
-          import os, glob
+          import os, glob, subprocess
           sdk_lib = os.path.join(env.subst("$PROJECT_PACKAGES_DIR"),
                                  "framework-arduinoespressif32", "tools", "sdk", "esp32", "lib")
-          mbed = sorted(glob.glob(os.path.join(sdk_lib, "libmbed*.a")))
-          print("[link_mbedtls] sdk_lib=%s isdir=%s" % (sdk_lib, os.path.isdir(sdk_lib)))
-          print("[link_mbedtls] archives=%s" % [os.path.basename(p) for p in mbed])
-          # Append the mbedTLS archives (as real file nodes, so SCons emits the
-          # path rather than -l<name>) after the framework libs, so the linker
-          # can satisfy the mbedtls_ssl_* references pulled in from libesp-tls.a.
-          env.Append(LIBS=[env.File(p) for p in mbed])
-          env.Append(LINKFLAGS=["-Wl,--allow-multiple-definition"])
+          alla = sorted(glob.glob(os.path.join(sdk_lib, "*.a")))
+          print("[diag] sdk_lib=%s (%d archives)" % (sdk_lib, len(alla)))
+          nm = env.subst("$CC").replace("gcc", "nm")
+          want = "mbedtls_ssl_handshake"
+          providers = []
+          for a in alla:
+              try:
+                  out = subprocess.check_output([nm, "-A", "--defined-only", a],
+                                                stderr=subprocess.DEVNULL).decode("utf-8", "ignore")
+              except Exception as e:
+                  continue
+              if want in out and (" T " + want in out or " W " + want in out):
+                  providers.append(os.path.basename(a))
+          print("[diag] archives defining %s: %s" % (want, providers))
+          print("[diag] TLS-ish archives present: %s" %
+                [os.path.basename(p) for p in alla
+                 if any(k in os.path.basename(p) for k in ("mbed","bear","tls","ssl","wolf","crypto"))])
           PY
 
           cat > wled/platformio_override.ini <<EOF
