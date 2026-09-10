@@ -46,6 +46,12 @@ jobs:
           extends = env:esp32dev
           custom_usermods = \${env:esp32dev.custom_usermods} ${USERMOD_NAME}
           build_flags = \${env:esp32dev.build_flags} -D WLED_RELEASE_NAME=\"ESP32_BambuChamberLight\"
+          ; the usermod is the only thing in the whole build that pulls in
+          ; <WiFiClientSecure.h>; WLED core never includes it, so the default
+          ; "chain" dependency finder never adds that framework library to the
+          ; graph. "deep+" makes PlatformIO parse the usermod's own sources and
+          ; resolve it against the ESP32 framework's bundled libraries.
+          lib_ldf_mode = deep+
           EOF
 
       - name: Set up Python
