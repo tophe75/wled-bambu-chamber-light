@@ -75,16 +75,15 @@ jobs:
 
           # 3. Tasmota's mbedTLS is built crypto-only (MBEDTLS_SSL_TLS_C off) --
           #    that is why the framework has no SSL symbols, and why the sources
-          #    above compiled to nothing. Give them a config that inherits the
-          #    framework's exact crypto/x509 options (so struct layouts still
-          #    match the prebuilt libmbedcrypto/libmbedx509) but force-enables
-          #    the TLS 1.2 client layer. Placed on the global include path and
-          #    selected via MBEDTLS_CONFIG_FILE.
-          with open(os.path.join(umdir, "bambu_mbedtls_config.h"), "w") as f:
+          #    above compiled to nothing. We cannot win the MBEDTLS_CONFIG_FILE
+          #    define (the framework appends its own after ours), so use the
+          #    *user* config hook, which mbedtls/esp_config.h includes at the
+          #    very end: it only ADDS the TLS 1.2 client options and leaves
+          #    every crypto/x509 struct-affecting option exactly as the
+          #    prebuilt libmbedcrypto/libmbedx509 were built.
+          with open(os.path.join(umdir, "bambu_mbedtls_user_config.h"), "w") as f:
               f.write(
           '''#pragma once
-          #include "mbedtls/esp_config.h"
-
           #ifndef MBEDTLS_SSL_TLS_C
           #define MBEDTLS_SSL_TLS_C
           #endif
@@ -114,7 +113,8 @@ jobs:
           #endif
           '''.replace("\n          ", "\n"))
           env.Append(CPPPATH=[umdir])
-          print("[fetch_mbedtls_ssl] wrote bambu_mbedtls_config.h, added %s to CPPPATH" % umdir)
+          env.Append(CPPDEFINES=[("MBEDTLS_USER_CONFIG_FILE", '\\"bambu_mbedtls_user_config.h\\"')])
+          print("[fetch_mbedtls_ssl] wrote bambu_mbedtls_user_config.h, added %s to CPPPATH" % umdir)
 
           # 4. make sure the crypto/x509 archives are on the link line for our ssl_*.o
           sdk_lib = os.path.join(pkgs, "framework-arduinoespressif32", "tools", "sdk", "esp32", "lib")
@@ -132,7 +132,7 @@ jobs:
           [env:${PIO_ENV}]
           extends = env:esp32dev
           custom_usermods = \${env:esp32dev.custom_usermods} ${USERMOD_NAME}
-          build_flags = \${env:esp32dev.build_flags} -D WLED_RELEASE_NAME=\"ESP32_BambuChamberLight\" -D MBEDTLS_CONFIG_FILE=\"bambu_mbedtls_config.h\"
+          build_flags = \${env:esp32dev.build_flags} -D WLED_RELEASE_NAME=\"ESP32_BambuChamberLight\"
           extra_scripts = \${scripts_defaults.extra_scripts}
             pre:fetch_mbedtls_ssl.py
           EOF
