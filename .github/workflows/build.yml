@@ -38,6 +38,15 @@ jobs:
 
       - name: Write platformio_override.ini
         run: |
+          # WLED's stock ESP32 build never links the mbedTLS SSL module (nothing
+          # in WLED core does TLS), so the esp_tls calls this usermod's
+          # bambu_tls_client.h makes leave mbedtls_ssl_* undefined at link time.
+          # Append the three mbedTLS archives *after* the framework libs.
+          cat > wled/link_mbedtls.py <<'PY'
+          Import("env")
+          env.Append(LIBS=["mbedtls", "mbedx509", "mbedcrypto"])
+          PY
+
           cat > wled/platformio_override.ini <<EOF
           [platformio]
           default_envs = ${PIO_ENV}
@@ -46,9 +55,13 @@ jobs:
           extends = env:esp32dev
           custom_usermods = \${env:esp32dev.custom_usermods} ${USERMOD_NAME}
           build_flags = \${env:esp32dev.build_flags} -D WLED_RELEASE_NAME=\"ESP32_BambuChamberLight\"
+          extra_scripts = \${scripts_defaults.extra_scripts}
+            post:link_mbedtls.py
           EOF
           echo "--- generated wled/platformio_override.ini ---"
           cat wled/platformio_override.ini
+          echo "--- generated wled/link_mbedtls.py ---"
+          cat wled/link_mbedtls.py
 
       - name: Set up Python
         uses: actions/setup-python@v5
