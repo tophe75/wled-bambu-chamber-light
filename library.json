@@ -2,7 +2,6 @@
   "name": "wled-bambu-chamber-light",
   "build": { "libArchive": false },
   "dependencies": {
-    "knolleary/PubSubClient": "^2.8",
-    "WiFiClientSecure": "*"
+    "knolleary/PubSubClient": "^2.8"
   }
 }
