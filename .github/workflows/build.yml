@@ -73,16 +73,39 @@ jobs:
                   print("[fetch_mbedtls_ssl] GET " + base + fn)
                   urllib.request.urlretrieve(base + fn, dst)
 
-          # 3. Print the tail of the framework's mbedTLS config for the record
-          #    (Tasmota builds it crypto-only, which is why the framework has no
-          #    SSL symbols). The TLS 1.2 client feature switches are forced on
-          #    via plain -D flags in build_flags below, which the preprocessor
-          #    sees before any config header so its #ifndef guards keep them.
-          for cfg in glob.glob(os.path.join(pkgs, "framework-arduinoespressif32", "**", "mbedtls", "esp_config.h"),
-                               recursive=True):
-              tail = open(cfg).read().splitlines()[-25:]
-              print("[fetch_mbedtls_ssl] %s tail:\n  %s" % (cfg, "\n  ".join(tail)))
-              break
+          # 3. esp_config.h pulls in the full upstream mbedtls/config.h (SSL on)
+          #    and then #undef's the whole SSL layer for Tasmota's crypto-only
+          #    trim -- which is why the framework has no SSL symbols. Its last
+          #    act before check_config.h is #include MBEDTLS_USER_CONFIG_FILE,
+          #    so that is where we re-enable the TLS 1.2 client. Every crypto /
+          #    x509 option keeps esp_config.h's value, so struct layouts still
+          #    match the prebuilt libmbedcrypto / libmbedx509.
+          with open(os.path.join(umdir, "bambu_mbedtls_user_config.h"), "w") as f:
+              f.write(
+          '''#pragma once
+          #undef  MBEDTLS_SSL_TLS_C
+          #define MBEDTLS_SSL_TLS_C
+          #undef  MBEDTLS_SSL_CLI_C
+          #define MBEDTLS_SSL_CLI_C
+          #undef  MBEDTLS_SSL_PROTO_TLS1_2
+          #define MBEDTLS_SSL_PROTO_TLS1_2
+          #undef  MBEDTLS_SSL_SERVER_NAME_INDICATION
+          #define MBEDTLS_SSL_SERVER_NAME_INDICATION
+          #undef  MBEDTLS_SSL_ENCRYPT_THEN_MAC
+          #define MBEDTLS_SSL_ENCRYPT_THEN_MAC
+          #undef  MBEDTLS_SSL_EXTENDED_MASTER_SECRET
+          #define MBEDTLS_SSL_EXTENDED_MASTER_SECRET
+          #undef  MBEDTLS_SSL_KEEP_PEER_CERTIFICATE
+          #define MBEDTLS_SSL_KEEP_PEER_CERTIFICATE
+          #undef  MBEDTLS_KEY_EXCHANGE_RSA_ENABLED
+          #define MBEDTLS_KEY_EXCHANGE_RSA_ENABLED
+          #undef  MBEDTLS_KEY_EXCHANGE_ECDHE_RSA_ENABLED
+          #define MBEDTLS_KEY_EXCHANGE_ECDHE_RSA_ENABLED
+          #undef  MBEDTLS_KEY_EXCHANGE_ECDHE_ECDSA_ENABLED
+          #define MBEDTLS_KEY_EXCHANGE_ECDHE_ECDSA_ENABLED
+          '''.replace("\n          ", "\n"))
+          env.Append(CPPPATH=[umdir])
+          print("[fetch_mbedtls_ssl] wrote bambu_mbedtls_user_config.h; CPPPATH += %s" % umdir)
 
           # 4. make sure the crypto/x509 archives are on the link line for our ssl_*.o
           sdk_lib = os.path.join(pkgs, "framework-arduinoespressif32", "tools", "sdk", "esp32", "lib")
@@ -101,11 +124,7 @@ jobs:
           extends = env:esp32dev
           custom_usermods = \${env:esp32dev.custom_usermods} ${USERMOD_NAME}
           build_flags = \${env:esp32dev.build_flags} -D WLED_RELEASE_NAME=\"ESP32_BambuChamberLight\"
-            -D MBEDTLS_SSL_TLS_C -D MBEDTLS_SSL_CLI_C -D MBEDTLS_SSL_PROTO_TLS1_2
-            -D MBEDTLS_SSL_SERVER_NAME_INDICATION -D MBEDTLS_SSL_ENCRYPT_THEN_MAC
-            -D MBEDTLS_SSL_EXTENDED_MASTER_SECRET
-            -D MBEDTLS_KEY_EXCHANGE_RSA_ENABLED -D MBEDTLS_KEY_EXCHANGE_ECDHE_RSA_ENABLED
-            -D MBEDTLS_KEY_EXCHANGE_ECDHE_ECDSA_ENABLED
+            -D MBEDTLS_USER_CONFIG_FILE=\"bambu_mbedtls_user_config.h\"
           extra_scripts = \${scripts_defaults.extra_scripts}
             pre:fetch_mbedtls_ssl.py
           EOF
