@@ -3,7 +3,11 @@ name: Build WLED firmware (esp32dev + bambu_chamber_light)
 on:
   push:
     branches: [ main ]
-  workflow_dispatch: {}   # lets you re-trigger a build manually from the Actions tab
+    tags: [ 'v*' ]          # pushing a version tag also cuts a GitHub Release
+  workflow_dispatch: {}      # lets you re-trigger a build manually from the Actions tab
+
+permissions:
+  contents: write            # needed for the "attach to Release" step on tag builds
 
 env:
   WLED_REPO: wled/WLED
@@ -56,9 +60,23 @@ jobs:
         working-directory: wled
         run: pio run -e ${{ env.PIO_ENV }}
 
+      - name: Stage firmware under a friendly name
+        run: |
+          mkdir -p dist
+          cp "wled/.pio/build/${PIO_ENV}/firmware.bin" \
+             "dist/WLED_${PIO_ENV}_${GITHUB_REF_NAME}.bin"
+
       - name: Upload firmware artifact
         uses: actions/upload-artifact@v4
         with:
-          name: WLED_${{ env.PIO_ENV }}
-          path: wled/.pio/build/${{ env.PIO_ENV }}/firmware.bin
+          name: WLED_${{ env.PIO_ENV }}_${{ github.ref_name }}
+          path: dist/*.bin
           if-no-files-found: error
+
+      - name: Attach firmware to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.bin
+          generate_release_notes: true
+          fail_on_unmatched_files: true

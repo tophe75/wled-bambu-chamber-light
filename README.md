@@ -49,16 +49,37 @@ It:
    environment plus this usermod (nothing else about the stock build
    is changed).
 3. Installs PlatformIO and runs `pio run`.
-4. Uploads the resulting `firmware.bin` as a workflow artifact.
+4. Uploads the resulting firmware as a workflow artifact named
+   `WLED_esp32dev_bambu_<ref>` (`<ref>` is `main` for a branch build,
+   or the tag name for a tagged release build).
 
 Watch it run under the repo's **Actions** tab. When it finishes (a
 few minutes — most of the time is toolchain download), open the run,
-scroll to **Artifacts**, and download `WLED_esp32dev_bambu`. Unzip it
-to get `firmware.bin`.
+scroll to **Artifacts**, and download `WLED_esp32dev_bambu_main`.
+Unzip it to get `WLED_esp32dev_bambu_main.bin` (a stock WLED
+`firmware.bin`, just renamed).
 
 You can re-run the build anytime from the Actions tab
 ("Run workflow") without pushing a new commit, e.g. after bumping
 `WLED_REF` in the workflow to pick up a newer WLED release.
+
+### Cutting a release
+
+Branch builds are for validation only — they never create a GitHub
+Release. Once you've flashed an artifact build and confirmed it works
+on your hardware, tag that commit to publish a Release with the
+firmware attached:
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+The same workflow runs, and on a `v*` tag it additionally creates
+(or updates) the matching GitHub Release with
+`WLED_esp32dev_bambu_v0.1.0.bin` attached and auto-generated notes.
+Delete the tag and Release if the build fails; only tag known-good
+commits.
 
 ## 4. Flash it onto your existing WLED device
 
@@ -68,7 +89,7 @@ partition and leaves your saved presets, segments, and `cfg.json`
 (WiFi credentials, effects, etc.) in place:
 
 1. In the WLED web UI: **Config → Security & Setup**.
-2. Scroll to **Manual OTA Update**, choose `firmware.bin`, click
+2. Scroll to **Manual OTA Update**, choose the downloaded `.bin`, click
    **Update**.
 3. The device reboots automatically once flashing completes.
 
