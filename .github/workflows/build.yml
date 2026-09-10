@@ -81,12 +81,15 @@ jobs:
           #    directly: inject an SSL 1.2 client re-enable just before its
           #    check_config.h include. Crypto/x509 options are untouched, so
           #    struct layouts still match the prebuilt libmbedcrypto/libmbedx509.
+          # Only RSA + DHE-RSA key exchanges: Tasmota physically removed the
+          # ECDHE fields (ecdh_ctx) from the framework's ssl_internal.h struct,
+          # so enabling ECDHE key exchanges makes the fetched ssl_cli.c fail to
+          # compile. dhm_ctx is still present, so DHE-RSA gives forward secrecy.
           enable = "\n".join("#undef %s\n#define %s" % (m, m) for m in (
               "MBEDTLS_SSL_TLS_C", "MBEDTLS_SSL_CLI_C", "MBEDTLS_SSL_PROTO_TLS1_2",
               "MBEDTLS_SSL_SERVER_NAME_INDICATION", "MBEDTLS_SSL_ENCRYPT_THEN_MAC",
               "MBEDTLS_SSL_EXTENDED_MASTER_SECRET", "MBEDTLS_SSL_KEEP_PEER_CERTIFICATE",
-              "MBEDTLS_KEY_EXCHANGE_RSA_ENABLED", "MBEDTLS_KEY_EXCHANGE_ECDHE_RSA_ENABLED",
-              "MBEDTLS_KEY_EXCHANGE_ECDHE_ECDSA_ENABLED"))
+              "MBEDTLS_KEY_EXCHANGE_RSA_ENABLED", "MBEDTLS_KEY_EXCHANGE_DHE_RSA_ENABLED"))
           marker = '#include "mbedtls/check_config.h"'
           patched = 0
           for cfg in glob.glob(os.path.join(pkgs, "framework-arduinoespressif32", "**", "mbedtls", "esp_config.h"),
