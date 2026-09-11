@@ -113,12 +113,15 @@ After reboot, go to **Config → Usermods** in the WLED UI. A new
 - **enabled** — turn the whole thing on
 - **printer-ip** — the printer's LAN IP
 - **printer-serial** — the printer's serial number
-- **access-code** — the LAN Access Code from step 1
-- **led-node** — `chamber_light` by default; some models expose the
-  toolhead light as `work_light` instead — switch this if the chamber
-  light doesn't respond
+- **access-code** — the LAN Access Code from step 1 (masked like a
+  password field once entered)
+- **chamber-enabled** — mirror WLED onto the chamber light (`chamber_light`
+  node); on by default
+- **toolhead-enabled** — mirror WLED onto the toolhead/work light
+  (`work_light` node); off by default since most models don't expose
+  one — turn on only if yours does
 - **invert** — flip the mapping (printer light off when WLED is on,
-  etc.)
+  etc.) — applies to both lights
 
 None of this needs a rebuild to change later — it's saved to
 `cfg.json` on the device like any other usermod setting.
@@ -135,8 +138,9 @@ None of this needs a rebuild to change later — it's saved to
   unreachable (powered off, wrong IP, etc.), so a dead printer never
   blocks WLED's own LED output.
 - Every WLED on/off transition (and once right after connecting, to
-  resync) sends one `ledctrl` MQTT publish; this is one-directional,
-  WLED → printer, with no polling or read-back from the printer.
+  resync) sends one `ledctrl` MQTT publish per enabled light; this is
+  one-directional, WLED → printer, with no polling or read-back from
+  the printer.
 - Current sync status is surfaced in WLED's own Info panel.
 
 ## Making changes later
