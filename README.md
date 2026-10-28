@@ -42,8 +42,8 @@ git push -u origin main
 Pushing to `main` triggers `.github/workflows/build.yml` automatically.
 It:
 
-1. Checks out this repo and a pinned WLED release (`v16.0.1` — the
-   latest stable tag as of this writing).
+1. Checks out this repo and the WLED release pinned in `WLED_VERSION`
+   (kept current automatically — see below).
 2. Drops the usermod into WLED's `usermods/` folder and writes a
    `platformio_override.ini` that builds the standard `esp32dev`
    environment plus this usermod.
@@ -66,8 +66,7 @@ Unzip it to get `WLED_esp32dev_bambu_main.bin` (a stock WLED
 `firmware.bin`, just renamed).
 
 You can re-run the build anytime from the Actions tab
-("Run workflow") without pushing a new commit, e.g. after bumping
-`WLED_REF` in the workflow to pick up a newer WLED release.
+("Run workflow") without pushing a new commit.
 
 ### Cutting a release
 
@@ -86,6 +85,19 @@ The same workflow runs, and on a `v*` tag it additionally creates
 `WLED_esp32dev_bambu_v0.1.0.bin` attached and auto-generated notes.
 Delete the tag and Release if the build fails; only tag known-good
 commits.
+
+### Automatic rebuilds for new WLED releases
+
+`.github/workflows/wled-update.yml` checks WLED's latest stable release
+once a day (or on demand via "Run workflow"). If it's newer than
+`WLED_VERSION`, it builds the firmware against it and, **only if that
+build succeeds**, commits the bumped `WLED_VERSION` to `main` and
+publishes the next patch release (e.g. `v0.1.0` → `v0.1.1`) with the
+`.bin` attached. If the build fails, nothing is committed or released.
+The run just fails and GitHub emails you. These releases have compiled
+but haven't been tested on hardware, and their notes say so.
+
+To pin WLED by hand instead, edit `WLED_VERSION` and push.
 
 ## 4. Flash it onto your existing WLED device
 
@@ -149,7 +161,7 @@ Edit `bambu_chamber_light.cpp` (behaviour) or `bambu_tls_client.h` (the
 TLS transport), commit, push — the Action rebuilds automatically and a
 fresh firmware artifact appears on that run.
 
-If you bump `WLED_REF` in `build.yml` to a newer WLED release, the
+When `WLED_VERSION` moves to a newer WLED release, the
 `fetch_mbedtls_ssl.py` step re-detects that framework's mbedTLS version
 and pulls matching sources, so it should keep working. If a future
 framework moves further away from stock mbedTLS 2.28.x, that script is

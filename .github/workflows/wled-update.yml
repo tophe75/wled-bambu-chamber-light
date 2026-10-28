@@ -1,0 +1,115 @@
+name: Rebuild on new WLED release
+
+# Once a day, check WLED's latest stable release. If it's newer than the
+# version pinned in WLED_VERSION: build against it, and only if the build
+# succeeds, commit the bumped WLED_VERSION to main and publish a new
+# patch-version Release (e.g. v0.1.0 -> v0.1.1) with the firmware attached.
+
+on:
+  schedule:
+    - cron: '17 5 * * *'     # daily, 05:17 UTC
+  workflow_dispatch: {}      # run the check by hand from the Actions tab
+
+permissions:
+  contents: write
+
+concurrency:
+  group: wled-update
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      update: ${{ steps.cmp.outputs.update }}
+      wled: ${{ steps.cmp.outputs.wled }}
+      tag: ${{ steps.cmp.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0       # need tags to pick the next release number
+
+      - name: Compare pinned WLED version with latest release
+        id: cmp
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          pinned="$(tr -d '[:space:]' < WLED_VERSION)"
+          # Only real releases: not draft, not pre-release (nightly, betas, RCs),
+          # and a plain vX.Y.Z tag -- belt and braces in case a nightly or beta
+          # is ever published without the pre-release flag.
+          latest="$(curl -fsSL -H "Authorization: Bearer $GH_TOKEN" \
+                     "https://api.github.com/repos/wled/WLED/releases?per_page=50" \
+                    | jq -r '.[] | select(.draft == false and .prerelease == false) | .tag_name' \
+                    | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n1)"
+          echo "pinned=$pinned latest=$latest"
+          if [ -z "$latest" ] || [ "$latest" = "null" ]; then
+            echo "::error::could not read latest WLED release"; exit 1
+          fi
+          newest="$(printf '%s\n%s\n' "${pinned#v}" "${latest#v}" | sort -V | tail -n1)"
+          if [ "$latest" = "$pinned" ] || [ "$newest" != "${latest#v}" ]; then
+            echo "Up to date."
+            echo "update=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # next patch version after the highest existing vX.Y.Z tag
+          last="$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' | sort -V | tail -n1)"
+          last="${last:-v0.0.0}"
+          IFS=. read -r maj min pat <<< "${last#v}"
+          tag="v${maj}.${min}.$((pat + 1))"
+          echo "New WLED $latest (pinned $pinned) -> will release $tag"
+          {
+            echo "update=true"
+            echo "wled=$latest"
+            echo "tag=$tag"
+          } >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: check
+    if: needs.check.outputs.update == 'true'
+    uses: ./.github/workflows/build.yml
+    with:
+      wled_ref: ${{ needs.check.outputs.wled }}
+      label: ${{ needs.check.outputs.tag }}
+
+  release:
+    needs: [check, build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      # Pushes made with GITHUB_TOKEN don't trigger other workflows, so this
+      # commit won't kick off a duplicate build.yml run.
+      - name: Bump WLED_VERSION on main
+        id: bump
+        env:
+          WLED: ${{ needs.check.outputs.wled }}
+        run: |
+          echo "$WLED" > WLED_VERSION
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -am "Build against WLED $WLED"
+          git push origin HEAD:main
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.build.outputs.artifact }}
+          path: dist
+
+      - name: Publish Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.check.outputs.tag }}
+          target_commitish: ${{ steps.bump.outputs.sha }}
+          name: ${{ needs.check.outputs.tag }} (WLED ${{ needs.check.outputs.wled }})
+          body: |
+            Automated build of the Bambu chamber light usermod against
+            [WLED ${{ needs.check.outputs.wled }}](https://github.com/wled/WLED/releases/tag/${{ needs.check.outputs.wled }}).
+            It compiled cleanly but has not been tested on hardware yet.
+          generate_release_notes: true
+          files: dist/*.bin
+          fail_on_unmatched_files: true

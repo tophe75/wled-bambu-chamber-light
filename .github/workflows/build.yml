@@ -5,24 +5,54 @@ on:
     branches: [ main ]
     tags: [ 'v*' ]          # pushing a version tag also cuts a GitHub Release
   workflow_dispatch: {}      # lets you re-trigger a build manually from the Actions tab
+  workflow_call:             # used by wled-update.yml to build against a new WLED release
+    inputs:
+      wled_ref:
+        description: WLED tag to build against (default -- contents of WLED_VERSION)
+        type: string
+        default: ''
+      label:
+        description: Name used for the .bin / artifact (default -- the git ref name)
+        type: string
+        default: ''
+    outputs:
+      artifact:
+        description: Name of the uploaded firmware artifact
+        value: ${{ jobs.build.outputs.artifact }}
 
 permissions:
   contents: write            # needed for the "attach to Release" step on tag builds
 
 env:
   WLED_REPO: wled/WLED
-  WLED_REF: v16.0.1        # pin to a known-good WLED release; bump deliberately when you want to update
   USERMOD_NAME: wled-bambu-chamber-light
   PIO_ENV: esp32dev_bambu
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    outputs:
+      artifact: ${{ steps.ver.outputs.artifact }}
     steps:
       - name: Checkout this usermod repo
         uses: actions/checkout@v4
         with:
           path: usermod-src
+
+      # The WLED release to build against is pinned in WLED_VERSION (bumped
+      # automatically by wled-update.yml when WLED publishes a new release).
+      - name: Resolve WLED version and build label
+        id: ver
+        env:
+          IN_REF: ${{ inputs.wled_ref }}
+          IN_LABEL: ${{ inputs.label }}
+        run: |
+          ref="${IN_REF:-$(tr -d '[:space:]' < usermod-src/WLED_VERSION)}"
+          label="${IN_LABEL:-$GITHUB_REF_NAME}"
+          echo "WLED_REF=$ref"      >> "$GITHUB_ENV"
+          echo "BUILD_LABEL=$label" >> "$GITHUB_ENV"
+          echo "artifact=WLED_${PIO_ENV}_${label}" >> "$GITHUB_OUTPUT"
+          echo "Building against WLED $ref as '$label'"
 
       - name: Checkout WLED (${{ env.WLED_REF }})
         uses: actions/checkout@v4
@@ -143,17 +173,17 @@ jobs:
         run: |
           mkdir -p dist
           cp "wled/.pio/build/${PIO_ENV}/firmware.bin" \
-             "dist/WLED_${PIO_ENV}_${GITHUB_REF_NAME}.bin"
+             "dist/WLED_${PIO_ENV}_${BUILD_LABEL}.bin"
 
       - name: Upload firmware artifact
         uses: actions/upload-artifact@v4
         with:
-          name: WLED_${{ env.PIO_ENV }}_${{ github.ref_name }}
+          name: WLED_${{ env.PIO_ENV }}_${{ env.BUILD_LABEL }}
           path: dist/*.bin
           if-no-files-found: error
 
       - name: Attach firmware to GitHub Release
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
           files: dist/*.bin
